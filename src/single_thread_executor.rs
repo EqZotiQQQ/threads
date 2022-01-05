@@ -1,61 +1,63 @@
 use std::collections::VecDeque;
-use std::env::Args;
 use std::fmt::{Display, Formatter};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::Duration;
-use crate::single_thread_executor::State::PRISTINE;
 
 enum State {
-    PRISTINE,
-    RUN,
-    FINISH,
+    NEW,
+    RUNNING,
+    STOPPED,
 }
 
 #[derive(Debug)]
-enum CustomError {
+pub enum CustomError {
     STOPPED,
 }
 
 pub struct Executor {
     executor: Option<thread::JoinHandle<()>>,
-    // queue: VecDeque<Arc<dyn Fn()>>,
     state: State,
     cv: Condvar,
-    mtx: Mutex<VecDeque<Arc<dyn Fn()>>>,
+    queue: Arc<Mutex<VecDeque<Box<dyn Fn()>>>>,
 }
 
 impl Executor {
     pub fn new() -> Executor {
         Executor {
-            // queue: VecDeque::new(),
             executor: None,
-            state: PRISTINE,
+            state: State::NEW,
             cv: Condvar::new(),
-            mtx: Mutex::new(VecDeque::new()),
+            queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
     
-    pub fn append(&mut self, f: Arc<dyn Fn()>) -> Result<(), CustomError> {
-        match self.state {
-            State::PRISTINE => {
-                self.executor = Some(thread::spawn(|| {
-                    self.state = State::RUN;
-                    while self.state == State::RUN {
-                        if self.mtx.lock().expect("").is_empty() {
-                            self.cv.wait_while(&self.cv);
-                        }
-                    }
-                }));
-                self.append(f);
+    pub fn append(&mut self, f: Box<dyn Fn()>) -> Result<(), CustomError> {
+        let processor = || {
+            loop {
+                // let s = self.queue.clone();
+                // if self.queue.lock().unwrap().is_empty() {
+                //     // self.cv.wait(self.queue.lock().unwrap()).unwrap();
+                // } else {
+                // //     let f = self.queue.lock().unwrap().pop_back().unwrap();
+                // //     f();
+                // }
+                // println!("Some stupid words! {}", s.lock().unwrap().len());
             }
-            State::RUN => {}
-            State::FINISH => {
+        };
+        match self.state {
+            State::NEW => {
+                self.executor = Some(thread::spawn(processor));
+                self.state = State::RUNNING;
+                self.queue.lock().unwrap().push_back(f);
+            }
+            State::RUNNING => {
+                self.queue.lock().unwrap().push_back(f);
+                self.cv.notify_all();
+            }
+            State::STOPPED => {
                 return Err(CustomError::STOPPED);
             }
         }
-        self.queue.push_back(f);
-        self.cv.notify_all();
         Ok(())
     }
 }
@@ -68,10 +70,11 @@ impl Display for Executor {
 
 impl Drop for Executor {
     fn drop(&mut self) {
-        println!("Join");
-        // self.executor.join();
+        todo!()
     }
 }
+
+unsafe impl Send for Executor {}
 
 #[cfg(test)]
 mod tests {
@@ -84,6 +87,6 @@ mod tests {
     fn create_executor() {
         let mut executor = Executor::new();
         let mut f = || -> () {println!("Hello!")};
-        executor.append(Arc::new(f));
+        executor.append(Box::new(f));
     }
 }
