@@ -42,13 +42,11 @@ impl Executor {
                 self.executor = Some(thread::spawn(move || {
                     loop {
                         let mut lock = queue.lock().unwrap();
-                        println!("#5");
                         if lock.is_empty() {
-                            println!("#1");
                             cv.wait(lock).unwrap();
                         } else {
-                            println!("#2");
-                            //..
+                            let f = lock.pop_back().unwrap();
+                            f();
                         }
                     }
                 }));
