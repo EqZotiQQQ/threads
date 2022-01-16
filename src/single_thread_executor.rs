@@ -3,64 +3,71 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum State {
-    // NEW,
+    NEW,
     RUNNING,
     STOPPED,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum CustomError {
+    NotStarted,
     STOPPED,
+    AlreadyRunning,
 }
 
 pub struct Executor {
     executor: Option<thread::JoinHandle<()>>,
     state: State,
-    cv: Condvar,
-    queue: Arc<Mutex<VecDeque<Box<dyn Fn() + Send + 'static>>>>,
+    cv: Arc<Condvar>,
+    queue: Arc<Mutex<VecDeque<Box<dyn Fn() + Send>>>>,
 }
 
 impl Executor {
     pub fn new() -> Executor {
         Executor {
-            executor: Some(
-                thread::spawn(|| {
-                    loop {}
-                })
-            ),
-            state: State::RUNNING,
-            cv: Condvar::new(),
+            executor: None,
+            state: State::NEW,
+            cv: Arc::new(Condvar::new()),
             queue: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
+    pub fn start(&mut self) -> Result<(), CustomError>{
+        match self.state {
+            State::NEW => {
+                let queue = Arc::clone(&self.queue);
+                let cv = Arc::clone(&self.cv);
+                self.executor = Some(thread::spawn(move || {
+                    loop {
+                        println!("Queue1!");
+                        let mut lock = queue.lock().unwrap();
+                        println!("Queue2!");
+                        if queue.lock().unwrap().is_empty() {
+                            println!("Empty!");
+                            cv.wait(lock).unwrap();
+                        } else {
+                            println!("Not empty!");
+                        }
+                    }
+                }));
+                self.state = State::RUNNING;
+            }
+            State::RUNNING => {return Err(CustomError::AlreadyRunning)}
+            State::STOPPED => {return Err(CustomError::STOPPED)}
+        }
+        Ok(())
+    }
+
     // Dumb shit is to use dyn Fn() + Send. It's literally illogical syntax.
     // Box<dyn Fn()> sugar for Box<dyn Fn() + 'static>
-    pub fn append(&mut self, f: Box<dyn Fn() + Send>) -> Result<(), CustomError> {
-        // let s = self.queue.clone();
-        // let s = f;
-        // let processor = move || {
-        //     loop {
-        //         // f();
-        //         // s.lock().unwrap().len();
-        //         // let s = self.queue.clone();
-        //         // if s.lock().unwrap().is_empty() {
-        //         if self.queue.lock().unwrap().is_empty() {
-        //             self.cv.wait(self.queue.lock().unwrap()).unwrap();
-        //         } else {
-        //         //     let f = self.queue.lock().unwrap().pop_back().unwrap();
-        //         //     f();
-        //         }
-        //         // println!("Some stupid words! {}", s.lock().unwrap().len());
-        //     }
-        // };
+    pub fn append(&mut self, f: Box<dyn Fn() + Send + 'static>) -> Result<(), CustomError> {
         match self.state {
-            // State::NEW => {
-            //     self.state = State::RUNNING;
-            //     self.queue.lock().unwrap().push_back(f);
-            // }
+            State::NEW => {
+                // self.queue.lock().unwrap().push_back(f);
+                return Err(CustomError::NotStarted); // just store task in queue without notification? Hmm
+            }
             State::RUNNING => {
                 self.queue.lock().unwrap().push_back(f);
                 self.cv.notify_all();
@@ -70,6 +77,10 @@ impl Executor {
             }
         }
         Ok(())
+    }
+
+    pub fn join(&mut self) {
+
     }
 }
 
