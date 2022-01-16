@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 use crate::single_thread_executor::Executor;
@@ -11,6 +10,10 @@ fn main() {
     executor.start();
     println!("Hello from main 2");
     let mut f = || -> () {println!("Hello from closure 1")};
+
+
+    sleep(Duration::from_secs(1));
+
     executor.append(Box::new(f)).unwrap();
     println!("Hello from main 3");
     sleep(Duration::from_secs(1));

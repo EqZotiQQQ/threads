@@ -30,7 +30,7 @@ impl Executor {
             executor: None,
             state: State::NEW,
             cv: Arc::new(Condvar::new()),
-            queue: Arc::new(Mutex::new(VecDeque::new())),
+            queue: Arc::new(Mutex::new(VecDeque::new())), // maybe replace vecdequeue to channel or crossbeam channel // 1st many to one 2nd many to many
         }
     }
 
@@ -41,14 +41,14 @@ impl Executor {
                 let cv = Arc::clone(&self.cv);
                 self.executor = Some(thread::spawn(move || {
                     loop {
-                        println!("Queue1!");
                         let mut lock = queue.lock().unwrap();
-                        println!("Queue2!");
-                        if queue.lock().unwrap().is_empty() {
-                            println!("Empty!");
+                        println!("#5");
+                        if lock.is_empty() {
+                            println!("#1");
                             cv.wait(lock).unwrap();
                         } else {
-                            println!("Not empty!");
+                            println!("#2");
+                            //..
                         }
                     }
                 }));
@@ -65,7 +65,6 @@ impl Executor {
     pub fn append(&mut self, f: Box<dyn Fn() + Send + 'static>) -> Result<(), CustomError> {
         match self.state {
             State::NEW => {
-                // self.queue.lock().unwrap().push_back(f);
                 return Err(CustomError::NotStarted); // just store task in queue without notification? Hmm
             }
             State::RUNNING => {
