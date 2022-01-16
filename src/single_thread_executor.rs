@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 // use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
+use std::thread::JoinHandle;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum State {
@@ -12,9 +14,9 @@ enum State {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum CustomError {
-    NotStarted,
-    STOPPED,
-    AlreadyRunning,
+    NotStarted, // Invoked when you append functions while Executor didn't start yet
+    STOPPED,    // Invoked when you append functions while Executor Stopped
+    AlreadyRunning, // Invoked when you tried to start Executor twice
 }
 
 pub struct Executor {
@@ -24,6 +26,9 @@ pub struct Executor {
     queue: Arc<Mutex<VecDeque<Box<dyn Fn() + Send>>>>,
 }
 
+/**
+Stupid executor for no-return functions
+ */
 impl Executor {
     pub fn new() -> Executor {
         Executor {
@@ -34,6 +39,7 @@ impl Executor {
         }
     }
 
+    /// Starts executor
     pub fn start(&mut self) -> Result<(), CustomError>{
         match self.state {
             State::NEW => {
@@ -60,6 +66,7 @@ impl Executor {
 
     // Dumb shit is to use dyn Fn() + Send. It's literally illogical syntax.
     // Box<dyn Fn()> sugar for Box<dyn Fn() + 'static>
+    /// Append function to queue
     pub fn append(&mut self, f: Box<dyn Fn() + Send + 'static>) -> Result<(), CustomError> {
         match self.state {
             State::NEW => {
@@ -76,8 +83,23 @@ impl Executor {
         Ok(())
     }
 
-    pub fn join(&mut self) {
-
+    /// Finish executor
+    pub fn join(&mut self) -> Result<(), CustomError> {
+        self.state = State::STOPPED;
+        let mut queue = Arc::clone(&self.queue);
+        while !self.queue.lock().unwrap().is_empty() {
+            let lock = queue.lock().unwrap();
+            self.cv.wait(lock).unwrap();
+        }
+        match &mut self.executor {
+            None => {
+                return Err(CustomError::NotStarted);
+            }
+            Some(handler) => {
+                // handler.join();
+            }
+        }
+        Ok(())
     }
 }
 
@@ -94,18 +116,3 @@ impl Executor {
 // }
 
 unsafe impl Sync for Executor {}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Arc;
-    use super::Executor;
-
-
-    #[test]
-    fn create_executor() {
-        let mut executor = Executor::new();
-        let mut f = || -> () {println!("Hello!")};
-        executor.append(Box::new(f));
-    }
-}
