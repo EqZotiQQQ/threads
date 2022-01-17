@@ -52,7 +52,6 @@ impl Executor {
                 self.executor = Some(thread::spawn(move || {
                     loop {
                         let mut lock = queue.lock().unwrap();
-                        dbg!("start->lock");
                         if lock.is_empty() {
                             if join.load(Ordering::Relaxed) {
                                 break;
@@ -63,7 +62,6 @@ impl Executor {
                             f();
                             cv.notify_all();
                         }
-                        dbg!("start->unlock");
                     }
                 }));
                 self.state = State::RUNNING;
@@ -100,16 +98,11 @@ impl Executor {
         let mut queue = Arc::clone(&self.queue);
         while !self.queue.lock().unwrap().is_empty() {
             let lock = queue.lock().unwrap();
-            dbg!("join->lock 1");
             self.cv.wait(lock).unwrap();
-            dbg!("join->lock 2");
         }
         self.cv.notify_all();
-        dbg!("Notify!");
         if let Some(handler) = self.executor.take() {
-            dbg!("join->lock 3");
             handler.join().expect("Failed to join thread");
-            dbg!("join->unlock 4");
         }
         Ok(())
     }
