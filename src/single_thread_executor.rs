@@ -100,7 +100,6 @@ impl Executor {
             let lock = queue.lock().unwrap();
             self.cv.wait(lock).unwrap();
         }
-        self.cv.notify_all();
         if let Some(handler) = self.executor.take() {
             handler.join().expect("Failed to join thread");
         }
