@@ -19,6 +19,6 @@ fn main() {
     let mut f = || -> () {println!("Hello from closure 2")};
     executor.append(Box::new(f)).unwrap();
     println!("Hello from main 4");
-    sleep(Duration::from_secs(2));
+    // sleep(Duration::from_secs(2));
 }
 

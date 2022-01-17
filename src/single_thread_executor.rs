@@ -20,9 +20,10 @@ pub enum CustomError {
 }
 
 pub struct Executor {
-    executor: Option<thread::JoinHandle<()>>,
-    state: State,
     cv: Arc<Condvar>,
+    executor: Option<thread::JoinHandle<()>>,
+    join: Arc<AtomicBool>,
+    state: State,
     queue: Arc<Mutex<VecDeque<Box<dyn Fn() + Send>>>>,
 }
 
@@ -32,9 +33,10 @@ Stupid executor for no-return functions
 impl Executor {
     pub fn new() -> Executor {
         Executor {
-            executor: None,
-            state: State::NEW,
             cv: Arc::new(Condvar::new()),
+            executor: None,
+            join: Arc::new(AtomicBool::new(false)),
+            state: State::NEW,
             queue: Arc::new(Mutex::new(VecDeque::new())), // maybe replace vecdequeue to channel or crossbeam channel // 1st many to one 2nd many to many
         }
     }
@@ -45,15 +47,23 @@ impl Executor {
             State::NEW => {
                 let queue = Arc::clone(&self.queue);
                 let cv = Arc::clone(&self.cv);
+                let join = Arc::clone(&self.join);
+
                 self.executor = Some(thread::spawn(move || {
                     loop {
                         let mut lock = queue.lock().unwrap();
+                        dbg!("start->lock");
                         if lock.is_empty() {
+                            if join.load(Ordering::Relaxed) {
+                                break;
+                            }
                             cv.wait(lock).unwrap();
                         } else {
                             let f = lock.pop_back().unwrap();
                             f();
+                            cv.notify_all();
                         }
+                        dbg!("start->unlock");
                     }
                 }));
                 self.state = State::RUNNING;
@@ -86,18 +96,20 @@ impl Executor {
     /// Finish executor
     pub fn join(&mut self) -> Result<(), CustomError> {
         self.state = State::STOPPED;
+        self.join.store(true, Ordering::Relaxed);
         let mut queue = Arc::clone(&self.queue);
         while !self.queue.lock().unwrap().is_empty() {
             let lock = queue.lock().unwrap();
+            dbg!("join->lock 1");
             self.cv.wait(lock).unwrap();
+            dbg!("join->lock 2");
         }
-        match &mut self.executor {
-            None => {
-                return Err(CustomError::NotStarted);
-            }
-            Some(handler) => {
-                // handler.join();
-            }
+        self.cv.notify_all();
+        dbg!("Notify!");
+        if let Some(handler) = self.executor.take() {
+            dbg!("join->lock 3");
+            handler.join().expect("Failed to join thread");
+            dbg!("join->unlock 4");
         }
         Ok(())
     }
@@ -109,10 +121,11 @@ impl Executor {
 //     }
 // }
 //
-// impl Drop for Executor {
-//     fn drop(&mut self) {
-//         todo!()
-//     }
-// }
+impl Drop for Executor {
+    fn drop(&mut self) {
+        println!("Drop");
+        self.join(); // we invoke join to correctly finish the jobs
+    }
+}
 
 unsafe impl Sync for Executor {}
